@@ -26,6 +26,13 @@ except ImportError:
 
 from styles import STYLES, get_style_prompt, ASPECT_RATIOS
 
+# Optional analyzer for smart splitting
+try:
+    from analyzer import DocumentAnalyzer, DocumentSection
+    ANALYZER_AVAILABLE = True
+except ImportError:
+    ANALYZER_AVAILABLE = False
+
 
 @dataclass
 class ContentChunk:
@@ -479,7 +486,11 @@ Examples:
 
     # Content options
     parser.add_argument("--max-chunk-size", type=int, default=1000,
-                       help="Maximum characters per chunk (default: 1000)")
+                       help="Maximum characters per chunk for simple mode (default: 1000)")
+    parser.add_argument("--smart-split", action="store_true",
+                       help="Use AI to intelligently analyze and split the document")
+    parser.add_argument("--max-images", type=int, default=8,
+                       help="Maximum number of images to generate (smart mode, default: 8)")
 
     # API options
     parser.add_argument("--api-key", help="Google API key")
@@ -494,17 +505,71 @@ Examples:
 
     args = parser.parse_args()
 
-    # Parse input file
-    parser_obj = MarkdownParser(max_chunk_size=args.max_chunk_size)
+    # Check for smart split mode
+    use_smart_split = args.smart_split
 
-    try:
-        chunks = parser_obj.parse_file(args.input)
-    except FileNotFoundError:
-        print(f"❌ Error: File not found: {args.input}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Error parsing file: {e}")
-        sys.exit(1)
+    if use_smart_split and not ANALYZER_AVAILABLE:
+        print("⚠️  Smart split requested but analyzer module not available")
+        print("   Falling back to simple parsing")
+        use_smart_split = False
+
+    # Parse input file
+    if use_smart_split:
+        # Smart AI-powered splitting
+        print(f"\n🧠 Using AI-powered smart split (max {args.max_images} images)...")
+        print("   This may take a minute as we analyze the document...\n")
+
+        try:
+            # Read content
+            with open(args.input, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Analyze with AI
+            analyzer = DocumentAnalyzer(api_key=args.api_key)
+            analysis = analyzer.analyze(content, max_images=args.max_images)
+
+            # Display analysis results
+            print(f"{'='*50}")
+            print(f"📄 {analysis.title}")
+            print(f"{'='*50}")
+            print(f"\n{analysis.overview}\n")
+            print(f"Suggested style: {analysis.suggested_style}")
+            print(f"Sections found: {len(analysis.sections)}")
+
+            # Convert DocumentSections to ContentChunks
+            chunks = []
+            for i, section in enumerate(analysis.sections):
+                chunks.append(ContentChunk(
+                    title=section.title,
+                    content=section.content,
+                    filename=MarkdownParser._sanitize_filename(section.title, i),
+                    index=i
+                ))
+
+            # Use suggested style if not overridden
+            if args.style == "sketchnote" and analysis.suggested_style:
+                suggested = analysis.suggested_style
+                if suggested in STYLES:
+                    args.style = suggested
+                    print(f"Using suggested style: {suggested}")
+
+        except Exception as e:
+            print(f"❌ Smart split failed: {e}")
+            print("   Falling back to simple parsing")
+            use_smart_split = False
+
+    if not use_smart_split:
+        # Simple header-based parsing
+        parser_obj = MarkdownParser(max_chunk_size=args.max_chunk_size)
+
+        try:
+            chunks = parser_obj.parse_file(args.input)
+        except FileNotFoundError:
+            print(f"❌ Error: File not found: {args.input}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ Error parsing file: {e}")
+            sys.exit(1)
 
     if not chunks:
         print("❌ No content chunks found in input file")

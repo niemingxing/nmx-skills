@@ -119,6 +119,34 @@ python3 scripts/batch.py \
 - **Error recovery** - Continues on failure, shows summary
 - **Smart chunking** - Splits long sections at logical break points
 
+### Smart Split Mode (Recommended)
+
+Use AI to intelligently analyze and split your document:
+
+```bash
+python3 scripts/batch.py \
+  --input document.md \
+  --output output_folder/ \
+  --smart-split \
+  --max-images 10
+```
+
+**Smart split advantages:**
+| Feature | Simple Mode | Smart Split Mode |
+|---------|-------------|------------------|
+| **Splitting method** | By headers (#, ##, ###) | AI semantic analysis |
+| **Context awareness** | None | Understands document flow |
+| **Information grouping** | Mechanical | Semantically coherent |
+| **Content balance** | Uneven | Evenly distributed |
+| **Style suggestion** | Manual | AI-recommended |
+| **Processing time** | Instant | +30-60 seconds |
+
+**When to use smart split:**
+- Complex documents with nested content
+- When related ideas span multiple headers
+- Professional/high-quality output needed
+- You want optimal content distribution per image
+
 **Batch options:**
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -129,7 +157,9 @@ python3 scripts/batch.py \
 | `--workers` / `-w` | Parallel workers | 3 |
 | `--brand` / `-b` | Brand name | None |
 | `--tagline` / `-t` | Brand tagline | None |
-| `--max-chunk-size` | Max chars per chunk | 1000 |
+| `--max-chunk-size` | Max chars per chunk (simple mode) | 1000 |
+| `--smart-split` | Use AI to analyze and split | - |
+| `--max-images` | Max images to generate (smart mode) | 8 |
 | `--dry-run` | Preview without generating | - |
 | `--list-chunks` | Show detected chunks | - |
 
@@ -140,12 +170,16 @@ python3 scripts/batch.py --input doc.md --output out/ --list-chunks
 
 # Dry run to verify settings
 python3 scripts/batch.py --input doc.md --output out/ --dry-run
+
+# Smart split preview (shows AI analysis)
+python3 scripts/batch.py --input doc.md --output out/ --smart-split --dry-run
 ```
 
 **Performance tips:**
 - Use `--workers 3-5` for best balance (API rate limits apply)
 - Higher workers = faster but more likely to hit rate limits
 - For large documents, start with lower worker count
+- Smart split adds ~1 minute but produces better results
 
 ## Style definitions
 
