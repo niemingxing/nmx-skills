@@ -477,19 +477,8 @@ Examples:
     chunks = []
     json_config = {}
 
-    # Try stdin first
-    if not sys.stdin.isatty():
-        try:
-            stdin_data = json.load(sys.stdin)
-            json_config = stdin_data
-            chunks = parse_json_input(stdin_data)
-            print(f"📥 Read {len(chunks)} sections from stdin")
-        except json.JSONDecodeError:
-            print("⚠️  Warning: stdin is not valid JSON")
-            sys.exit(1)
-
-    # Then try file input
-    elif args.input:
+    # Priority 1: File input via --input
+    if args.input:
         file_path = Path(args.input)
 
         if not file_path.exists():
@@ -508,6 +497,17 @@ Examples:
             # Fall back to markdown
             print(f"📄 Parsing as markdown (JSON parse failed)")
             chunks = parse_markdown_input(content)
+
+    # Priority 2: stdin (only when no --input and stdin has data)
+    elif not sys.stdin.isatty():
+        try:
+            stdin_data = json.load(sys.stdin)
+            json_config = stdin_data
+            chunks = parse_json_input(stdin_data)
+            print(f"📥 Read {len(chunks)} sections from stdin")
+        except json.JSONDecodeError:
+            print("⚠️  Warning: stdin is not valid JSON")
+            sys.exit(1)
 
     else:
         print("❌ Error: No input provided. Use --input or pipe JSON via stdin.")
