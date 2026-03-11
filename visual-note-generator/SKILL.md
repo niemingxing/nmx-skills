@@ -1,6 +1,6 @@
 ---
 name: visual-note-generator
-description: Generate visual note-style infographics from markdown documents using AI image generation. Use this skill whenever the user wants to create visual notes, sketchnote-style images, infographics from documents, or convert text content into visual formats. This skill handles the entire workflow: document analysis, style selection, aspect ratio choice, API configuration, and image generation.
+description: "Generate visual note-style infographics from markdown documents using AI image generation. Use this skill whenever the user wants to create visual notes, sketchnote-style images, infographics from documents, or convert text content into visual formats. This skill handles the entire workflow - document analysis, style selection, aspect ratio choice, API configuration, and image generation."
 ---
 
 # Visual Note Generator
