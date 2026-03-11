@@ -102,84 +102,45 @@ The script handles:
 
 ## Batch Generation
 
-For processing entire markdown documents, use the batch script:
+For processing entire markdown documents, use the batch script with AI-powered smart splitting:
 
 ```bash
 python3 scripts/batch.py \
   --input document.md \
   --output output_folder/ \
-  --style sketchnote \
+  --max-images 10 \
   --workers 4
 ```
 
-**Batch features:**
-- **Automatic document splitting** - Divides markdown by headers (#, ##, ###)
-- **Parallel generation** - Multiple workers generate images simultaneously
-- **Progress tracking** - Real-time status updates
-- **Error recovery** - Continues on failure, shows summary
-- **Smart chunking** - Splits long sections at logical break points
-
-### Smart Split Mode (Recommended)
-
-Use AI to intelligently analyze and split your document:
-
-```bash
-python3 scripts/batch.py \
-  --input document.md \
-  --output output_folder/ \
-  --smart-split \
-  --max-images 10
-```
-
-**Smart split advantages:**
-| Feature | Simple Mode | Smart Split Mode |
-|---------|-------------|------------------|
-| **Splitting method** | By headers (#, ##, ###) | AI semantic analysis |
-| **Context awareness** | None | Understands document flow |
-| **Information grouping** | Mechanical | Semantically coherent |
-| **Content balance** | Uneven | Evenly distributed |
-| **Style suggestion** | Manual | AI-recommended |
-| **Processing time** | Instant | +30-60 seconds |
-
-**When to use smart split:**
-- Complex documents with nested content
-- When related ideas span multiple headers
-- Professional/high-quality output needed
-- You want optimal content distribution per image
+**How it works:**
+1. AI analyzes the entire document structure
+2. Intelligently groups related content by meaning (not just headers)
+3. Suggests the best visual style for your content
+4. Generates images in parallel
 
 **Batch options:**
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--input` / `-i` | Input markdown file | Required |
 | `--output` / `-o` | Output directory | Required |
-| `--style` / `-s` | Visual style | sketchnote |
+| `--max-images` / `-n` | Max number of images | 8 |
+| `--style` / `-s` | Visual style (or let AI suggest) | sketchnote |
 | `--aspect-ratio` / `-a` | Aspect ratio | 9:16 |
 | `--workers` / `-w` | Parallel workers | 3 |
 | `--brand` / `-b` | Brand name | None |
 | `--tagline` / `-t` | Brand tagline | None |
-| `--max-chunk-size` | Max chars per chunk (simple mode) | 1000 |
-| `--smart-split` | Use AI to analyze and split | - |
-| `--max-images` | Max images to generate (smart mode) | 8 |
 | `--dry-run` | Preview without generating | - |
-| `--list-chunks` | Show detected chunks | - |
 
 **Preview before generating:**
 ```bash
-# See what chunks will be generated
-python3 scripts/batch.py --input doc.md --output out/ --list-chunks
-
-# Dry run to verify settings
+# Dry run to see AI analysis and planned images
 python3 scripts/batch.py --input doc.md --output out/ --dry-run
-
-# Smart split preview (shows AI analysis)
-python3 scripts/batch.py --input doc.md --output out/ --smart-split --dry-run
 ```
 
 **Performance tips:**
-- Use `--workers 3-5` for best balance (API rate limits apply)
-- Higher workers = faster but more likely to hit rate limits
-- For large documents, start with lower worker count
-- Smart split adds ~1 minute but produces better results
+- Use `--workers 3-5` for best balance
+- AI analysis takes ~30-60 seconds
+- Higher workers = faster but more rate limiting
 
 ## Style definitions
 

@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Visual Note Generator - Batch and parallel image generation.
+Visual Note Generator - Batch and parallel image generation with AI-powered smart splitting.
 
 Usage:
-    python3 batch.py --input document.md --output output_dir/ [--workers 4]
-    python3 batch.py --input document.md --output output_dir/ --style sketchnote
+    python3 batch.py --input document.md --output output_dir/ [--max-images 10] [--workers 4]
 """
 
 import os
 import sys
-import re
+import json
 import base64
 import argparse
 import time
@@ -26,13 +25,6 @@ except ImportError:
 
 from styles import STYLES, get_style_prompt, ASPECT_RATIOS
 
-# Optional analyzer for smart splitting
-try:
-    from analyzer import DocumentAnalyzer, DocumentSection
-    ANALYZER_AVAILABLE = True
-except ImportError:
-    ANALYZER_AVAILABLE = False
-
 
 @dataclass
 class ContentChunk:
@@ -41,6 +33,7 @@ class ContentChunk:
     content: str
     filename: str
     index: int
+    visual_type: str = "list"
 
 
 @dataclass
@@ -53,123 +46,138 @@ class GenerationResult:
     duration: float = 0.0
 
 
-class MarkdownParser:
-    """Parse markdown documents into content chunks."""
+class DocumentAnalyzer:
+    """AI-powered document analyzer for intelligent content splitting."""
 
-    # Headers to split on (priority order)
-    SPLIT_HEADERS = ['#', '##', '###']
+    def __init__(self, api_key: str = None, model: str = "gemini-2.0-flash-exp"):
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        self.model = model
 
-    def __init__(self, max_chunk_size: int = 1000):
+        if not self.api_key:
+            raise ValueError("API key required. Set GOOGLE_API_KEY or use --api-key")
+
+    def analyze(self, content: str, max_images: int = 10) -> dict:
         """
+        Analyze document and intelligently split into sections.
+
         Args:
-            max_chunk_size: Maximum characters per chunk (soft limit)
+            content: The document content to analyze
+            max_images: Maximum number of images to generate
+
+        Returns:
+            Dict with analysis results including sections list
         """
-        self.max_chunk_size = max_chunk_size
+        # Truncate content if too long
+        max_content_length = 12000
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n...[content truncated]"
 
-    def parse_file(self, file_path: str) -> List[ContentChunk]:
-        """Parse a markdown file into content chunks."""
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        prompt = f"""You are a document analyst for visual note generation. Analyze this document and suggest how to split it into {max_images} visual images.
 
-        return self.parse_content(content, source_file=file_path)
+DOCUMENT CONTENT:
+```
+{content}
+```
 
-    def parse_content(self, content: str, source_file: str = "") -> List[ContentChunk]:
-        """Parse markdown content into chunks based on headers."""
-        chunks = []
-        lines = content.split('\n')
+Your task:
+1. Identify the document's main topic and purpose
+2. Group related content together semantically (don't just follow headers - think about flow!)
+3. Each group should be:
+   - Coherent and focused on ONE main idea
+   - Small enough to fit on one visual image
+   - Logically complete (don't cut off explanations)
 
-        current_title = "Introduction"
-        current_content = []
-        current_level = 0
-        chunk_index = 0
+Respond ONLY with valid JSON in this exact format:
+{{
+  "title": "Document main title",
+  "overview": "Brief 2-3 sentence summary",
+  "suggested_style": "sketchnote|minimalist|colorful|dark|retro",
+  "sections": [
+    {{
+      "title": "Section title",
+      "content": "Actual extracted/summarized content for this section (3-8 sentences)",
+      "key_points": ["concept1", "concept2"],
+      "visual_type": "timeline|comparison|list|process|diagram|other"
+    }}
+  ]
+}}
 
-        for line in lines:
-            # Check for headers
-            header_match = re.match(r'^(#{1,3})\s+(.+)$', line)
+IMPORTANT:
+- Group by MEANING, not just by headers
+- Each section should tell a complete mini-story
+- Keep related points together even if they cross headers
+- Maximum {max_images} sections
+- Include actual CONTENT in each section, not just descriptions
+"""
 
-            if header_match:
-                level = len(header_match.group(1))
-                title = header_match.group(2).strip()
+        response = self._call_api(prompt)
+        return self._parse_json_response(response)
 
-                # Save previous chunk if exists
-                if current_content:
-                    chunks.append(ContentChunk(
-                        title=current_title,
-                        content='\n'.join(current_content).strip(),
-                        filename=self._sanitize_filename(current_title, chunk_index),
-                        index=chunk_index
-                    ))
-                    chunk_index += 1
+    def _call_api(self, prompt: str, temperature: float = 0.7) -> str:
+        """Call the Gemini API."""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
 
-                # Start new chunk
-                current_title = title
-                current_content = []
-                current_level = level
-            else:
-                # Skip empty lines at start of content
-                if line.strip() or current_content:
-                    current_content.append(line)
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": 8192
+            }
+        }
 
-                # Split if chunk gets too large
-                if len('\n'.join(current_content)) > self.max_chunk_size:
-                    # Try to split at a good break point
-                    if self._split_chunk(chunks, current_content, current_title, chunk_index):
-                        chunk_index += 1
-                        current_content = []
+        response = requests.post(url, json=payload, timeout=120)
+        response.raise_for_status()
+        result = response.json()
 
-        # Don't forget the last chunk
-        if current_content:
-            chunks.append(ContentChunk(
-                title=current_title,
-                content='\n'.join(current_content).strip(),
-                filename=self._sanitize_filename(current_title, chunk_index),
-                index=chunk_index
-            ))
+        if "candidates" in result and len(result["candidates"]) > 0:
+            parts = result["candidates"][0].get("content", {}).get("parts", [])
+            for part in parts:
+                if "text" in part:
+                    return part["text"]
 
-        return chunks
+        raise ValueError("No text in API response")
 
-    def _split_chunk(self, chunks: List[ContentChunk],
-                     content: List[str], title: str, index: int) -> bool:
-        """Try to split a large chunk at a logical break point."""
-        content_str = '\n'.join(content)
+    def _parse_json_response(self, response: str) -> dict:
+        """Parse JSON from LLM response (handles markdown code blocks)."""
+        response = response.strip()
 
-        # Look for good split points: empty lines followed by non-list content
-        split_points = []
-        for i, line in enumerate(content):
-            if i > len(content) * 0.3:  # Only split after 30% into content
-                if not line.strip() and i + 1 < len(content):
-                    next_line = content[i + 1]
-                    # Good split: not a list item, not a code block
-                    if (not next_line.strip().startswith(('-', '*', '+', '>', '```'))
-                            and not next_line.strip().startswith(('1.', '2.', '3.', '4.', '5.'))):
-                        split_points.append(i)
+        # Try direct parse
+        try:
+            return json.loads(response)
+        except:
+            pass
 
-        if split_points:
-            split_at = split_points[0]
-            chunks.append(ContentChunk(
-                title=title,
-                content='\n'.join(content[:split_at]).strip(),
-                filename=self._sanitize_filename(f"{title}_part1", index),
-                index=index
-            ))
-            content[:] = content[split_at:]
-            return True
+        # Try extracting from markdown code block
+        if "```" in response:
+            start = response.find("```json") + 7
+            if start == 6:  # ```json not found
+                start = response.find("```") + 3
+            end = response.rfind("```")
+            if start > 0 and end > start:
+                json_str = response[start:end].strip()
+                return json.loads(json_str)
 
-        return False
+        # Try finding first { and last }
+        start = response.find("{")
+        end = response.rfind("}")
+        if start >= 0 and end > start:
+            json_str = response[start:end + 1]
+            return json.loads(json_str)
 
-    def _sanitize_filename(self, title: str, index: int) -> str:
-        """Create a safe filename from title."""
-        # Remove/replace special characters
-        safe = re.sub(r'[^\w\s-]', '', title)
-        safe = re.sub(r'[-\s]+', '-', safe)
-        safe = safe.strip('-').lower()
+        raise ValueError(f"Could not parse JSON from response")
 
-        # Add index prefix for ordering
-        return f"{index:02d}_{safe}"[:50]  # Limit length
+
+def sanitize_filename(title: str, index: int) -> str:
+    """Create a safe filename from title."""
+    import re
+    safe = re.sub(r'[^\w\s-]', '', title)
+    safe = re.sub(r'[-\s]+', '-', safe)
+    safe = safe.strip('-').lower()
+    return f"{index:02d}_{safe}"[:50]
 
 
 class ImageGenerator:
-    """Generate images using API with parallel support."""
+    """Generate images using Gemini API."""
 
     def __init__(self, api_key: str = None, model: str = "gemini-3.1-flash-image-preview"):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
@@ -188,16 +196,21 @@ class ImageGenerator:
         aspect_ratio: str = "9:16",
         brand_name: str = None,
         brand_tagline: str = None,
-        title: str = None
+        title: str = None,
+        visual_type: str = "list"
     ) -> str:
         """Build a complete image generation prompt."""
         style_prefix = get_style_prompt(style)
+
+        # Add visual type guidance
+        visual_guidance = self._get_visual_guidance(visual_type)
 
         prompt = f"""
 {style_prefix.strip()}
 
 VERTICAL INFOGRAPHIC ({aspect_ratio} aspect ratio)
 
+{visual_guidance}
 """
 
         # Add header
@@ -231,27 +244,30 @@ Add small doodle decorations at bottom
 
         return prompt.strip()
 
+    def _get_visual_guidance(self, visual_type: str) -> str:
+        """Get visual layout guidance based on type."""
+        templates = {
+            "timeline": "=== VISUAL LAYOUT: TIMELINE ===\nHorizontal or vertical timeline with key events. Use arrow connectors between events. Each event: date/time label + title + brief description.",
+            "comparison": "=== VISUAL LAYOUT: COMPARISON ===\nSplit view with two columns. Left side: Topic A | Right side: Topic B. VS badge in center. Each side has 3-4 key points with icons.",
+            "list": "=== VISUAL LAYOUT: NUMBERED LIST ===\nClean numbered list with icons. Each item: number + icon + title + brief text. Use visual hierarchy with size and color.",
+            "process": "=== VISUAL LAYOUT: PROCESS FLOW ===\nCircular or linear flow diagram. Each step in a box/card connected by arrows. Number steps clearly. Include key action for each step.",
+            "diagram": "=== VISUAL LAYOUT: DIAGRAM ===\nCentral concept in middle. Related concepts branching out. Use connecting lines with labels. Include key relationships.",
+            "other": "=== VISUAL LAYOUT: FLEXIBLE ===\nOrganize content visually with clear visual hierarchy, grouped related items, visual connectors between concepts, and icons for key concepts."
+        }
+        return templates.get(visual_type, templates["list"])
+
     def generate_image(
         self,
         prompt: str,
         output_path: str,
         timeout: int = 180
     ) -> tuple[bool, str]:
-        """
-        Generate a single image.
-
-        Returns:
-            (success, error_message)
-        """
+        """Generate a single image. Returns (success, error_message)."""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
 
         payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "temperature": 0.8
-            }
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.8}
         }
 
         try:
@@ -259,7 +275,6 @@ Add small doodle decorations at bottom
             response.raise_for_status()
             result = response.json()
 
-            # Parse response for image data
             if "candidates" in result and len(result["candidates"]) > 0:
                 parts = result["candidates"][0].get("content", {}).get("parts", [])
 
@@ -267,18 +282,15 @@ Add small doodle decorations at bottom
                     if "inlineData" in part:
                         img_data = part["inlineData"].get("data")
                         if img_data:
-                            # Ensure output directory exists
                             output_path = Path(output_path)
                             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-                            # Save image
                             img_bytes = base64.b64decode(img_data)
                             with open(output_path, "wb") as f:
                                 f.write(img_bytes)
 
                             return True, ""
 
-            # Check for error response
             if "error" in result:
                 error_msg = result['error'].get('message', 'Unknown error')
                 return False, error_msg
@@ -326,17 +338,7 @@ class BatchGenerator:
         output_dir: str,
         progress_callback: Callable[[GenerationResult], None] = None
     ) -> List[GenerationResult]:
-        """
-        Generate images for all chunks in parallel.
-
-        Args:
-            chunks: List of content chunks to generate
-            output_dir: Output directory for images
-            progress_callback: Optional callback for progress updates
-
-        Returns:
-            List of generation results
-        """
+        """Generate images for all chunks in parallel."""
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
@@ -355,17 +357,16 @@ class BatchGenerator:
             for attempt in range(max_retries + 1):
                 start_time = time.time()
 
-                # Build prompt
                 prompt = self.generator.build_prompt(
                     content=chunk.content,
                     style=self.style,
                     aspect_ratio=self.aspect_ratio,
                     brand_name=self.brand_name,
                     brand_tagline=self.brand_tagline,
-                    title=chunk.title
+                    title=chunk.title,
+                    visual_type=chunk.visual_type
                 )
 
-                # Generate
                 success, error = self.generator.generate_image(
                     prompt=str(prompt),
                     output_path=str(output_file)
@@ -414,7 +415,6 @@ class BatchGenerator:
                 results.append(result)
                 completed += 1
 
-                # Progress indicator
                 status = "✅" if result.success else "❌"
                 duration_str = f"{result.duration:.1f}s"
                 print(f"   [{completed}/{total}] {status} {result.chunk.filename} ({duration_str})")
@@ -422,7 +422,6 @@ class BatchGenerator:
                 if result.error:
                     print(f"      Error: {result.error}")
 
-                # Call progress callback if provided
                 if progress_callback:
                     progress_callback(result)
 
@@ -444,37 +443,42 @@ class BatchGenerator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Batch generate visual note images from markdown",
+        description="Batch generate visual note images from markdown using AI smart splitting",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Generate from markdown file
+  # Basic usage
   python3 batch.py --input notes.md --output output/
 
-  # With custom style and brand
-  python3 batch.py --input notes.md --output output/ --style minimalist --brand "MyBrand"
+  # Specify max images
+  python3 batch.py --input notes.md --output output/ --max-images 10
 
-  # Parallel with 4 workers
+  # With brand and style
+  python3 batch.py --input notes.md --output output/ --brand "MyBrand" --style minimalist
+
+  # Parallel generation
   python3 batch.py --input notes.md --output output/ --workers 4
 
-  # Specify aspect ratio
-  python3 batch.py --input notes.md --output output/ --aspect-ratio 16:9
+  # Preview first (dry run)
+  python3 batch.py --input notes.md --output output/ --dry-run
         """
     )
 
-    # Input options
-    parser.add_argument("--input", "-i", required=True,
-                       help="Input markdown file")
-    parser.add_argument("--output", "-o", required=True,
-                       help="Output directory for images")
+    # Required
+    parser.add_argument("--input", "-i", required=True, help="Input markdown file")
+    parser.add_argument("--output", "-o", required=True, help="Output directory")
+
+    # Content options
+    parser.add_argument("--max-images", "-n", type=int, default=8,
+                       help="Maximum number of images to generate (default: 8)")
 
     # Style options
     parser.add_argument("--style", "-s", default="sketchnote",
                        choices=list(STYLES.keys()),
-                       help="Visual style")
+                       help="Visual style (default: sketchnote, or let AI suggest)")
     parser.add_argument("--aspect-ratio", "-a", default="9:16",
                        choices=list(ASPECT_RATIOS.keys()),
-                       help="Aspect ratio")
+                       help="Aspect ratio (default: 9:16)")
 
     # Brand options
     parser.add_argument("--brand", "-b", help="Brand name for header/footer")
@@ -484,120 +488,81 @@ Examples:
     parser.add_argument("--workers", "-w", type=int, default=3,
                        help="Number of parallel workers (default: 3)")
 
-    # Content options
-    parser.add_argument("--max-chunk-size", type=int, default=1000,
-                       help="Maximum characters per chunk for simple mode (default: 1000)")
-    parser.add_argument("--smart-split", action="store_true",
-                       help="Use AI to intelligently analyze and split the document")
-    parser.add_argument("--max-images", type=int, default=8,
-                       help="Maximum number of images to generate (smart mode, default: 8)")
-
     # API options
     parser.add_argument("--api-key", help="Google API key")
     parser.add_argument("--model", default="gemini-3.1-flash-image-preview",
-                       help="Gemini model to use")
+                       help="Image generation model (default: gemini-3.1-flash-image-preview)")
 
     # Other options
     parser.add_argument("--dry-run", action="store_true",
-                       help="Show what would be generated without calling API")
-    parser.add_argument("--list-chunks", action="store_true",
-                       help="List detected chunks and exit")
+                       help="Preview without generating images")
 
     args = parser.parse_args()
 
-    # Check for smart split mode
-    use_smart_split = args.smart_split
-
-    if use_smart_split and not ANALYZER_AVAILABLE:
-        print("⚠️  Smart split requested but analyzer module not available")
-        print("   Falling back to simple parsing")
-        use_smart_split = False
-
-    # Parse input file
-    if use_smart_split:
-        # Smart AI-powered splitting
-        print(f"\n🧠 Using AI-powered smart split (max {args.max_images} images)...")
-        print("   This may take a minute as we analyze the document...\n")
-
-        try:
-            # Read content
-            with open(args.input, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # Analyze with AI
-            analyzer = DocumentAnalyzer(api_key=args.api_key)
-            analysis = analyzer.analyze(content, max_images=args.max_images)
-
-            # Display analysis results
-            print(f"{'='*50}")
-            print(f"📄 {analysis.title}")
-            print(f"{'='*50}")
-            print(f"\n{analysis.overview}\n")
-            print(f"Suggested style: {analysis.suggested_style}")
-            print(f"Sections found: {len(analysis.sections)}")
-
-            # Convert DocumentSections to ContentChunks
-            chunks = []
-            for i, section in enumerate(analysis.sections):
-                chunks.append(ContentChunk(
-                    title=section.title,
-                    content=section.content,
-                    filename=MarkdownParser._sanitize_filename(section.title, i),
-                    index=i
-                ))
-
-            # Use suggested style if not overridden
-            if args.style == "sketchnote" and analysis.suggested_style:
-                suggested = analysis.suggested_style
-                if suggested in STYLES:
-                    args.style = suggested
-                    print(f"Using suggested style: {suggested}")
-
-        except Exception as e:
-            print(f"❌ Smart split failed: {e}")
-            print("   Falling back to simple parsing")
-            use_smart_split = False
-
-    if not use_smart_split:
-        # Simple header-based parsing
-        parser_obj = MarkdownParser(max_chunk_size=args.max_chunk_size)
-
-        try:
-            chunks = parser_obj.parse_file(args.input)
-        except FileNotFoundError:
-            print(f"❌ Error: File not found: {args.input}")
-            sys.exit(1)
-        except Exception as e:
-            print(f"❌ Error parsing file: {e}")
-            sys.exit(1)
-
-    if not chunks:
-        print("❌ No content chunks found in input file")
+    # Read document
+    try:
+        with open(args.input, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        print(f"❌ Error: File not found: {args.input}")
         sys.exit(1)
 
-    # List chunks mode
-    if args.list_chunks:
-        print(f"\n📋 Found {len(chunks)} content chunks:\n")
-        for i, chunk in enumerate(chunks, 1):
-            preview = chunk.content[:100].replace('\n', ' ')
-            print(f"{i}. [{chunk.filename}]")
-            print(f"   Title: {chunk.title}")
-            print(f"   Content: {preview}...")
-            print()
-        sys.exit(0)
+    # Analyze document with AI
+    print(f"\n🧠 Analyzing document with AI...")
+    print(f"   Document: {args.input}")
+    print(f"   Max images: {args.max_images}")
+    print(f"   Please wait...\n")
+
+    try:
+        analyzer = DocumentAnalyzer(api_key=args.api_key)
+        analysis = analyzer.analyze(content, max_images=args.max_images)
+    except Exception as e:
+        print(f"❌ Analysis failed: {e}")
+        sys.exit(1)
+
+    # Display analysis
+    print(f"{'='*50}")
+    print(f"📄 {analysis.get('title', 'Document Analysis')}")
+    print(f"{'='*50}")
+    print(f"\n{analysis.get('overview', '')}\n")
+
+    suggested_style = analysis.get('suggested_style', 'sketchnote')
+    if args.style == "sketchnote" and suggested_style in STYLES:
+        args.style = suggested_style
+
+    print(f"Suggested style: {suggested_style}")
+    print(f"Using style: {args.style}")
+    print(f"Sections to generate: {len(analysis.get('sections', []))}\n")
+
+    # Convert to ContentChunks
+    chunks = []
+    for i, section_data in enumerate(analysis.get('sections', [])):
+        chunks.append(ContentChunk(
+            title=section_data.get('title', f'Section {i+1}'),
+            content=section_data.get('content', ''),
+            filename=sanitize_filename(section_data.get('title', f'section_{i+1}'), i),
+            index=i,
+            visual_type=section_data.get('visual_type', 'list')
+        ))
 
     # Dry run mode
     if args.dry_run:
-        print(f"\n🔍 Dry run mode - showing {len(chunks)} images to generate:\n")
+        print(f"{'='*50}")
+        print("🔍 Dry run - images that will be generated:")
+        print(f"{'='*50}\n")
         for i, chunk in enumerate(chunks, 1):
             print(f"{i}. {chunk.filename}.png")
             print(f"   Title: {chunk.title}")
+            print(f"   Type: {chunk.visual_type}")
             print(f"   Length: {len(chunk.content)} chars")
-        print(f"\nOutput directory: {args.output}")
+            preview = chunk.content[:80].replace('\n', ' ')
+            print(f"   Preview: {preview}...")
+            print()
+        print(f"Output directory: {args.output}")
         print(f"Style: {args.style} | Aspect Ratio: {args.aspect_ratio}")
         sys.exit(0)
 
-    # Generate
+    # Generate images
     batch_gen = BatchGenerator(
         api_key=args.api_key,
         style=args.style,
@@ -609,7 +574,6 @@ Examples:
 
     results = batch_gen.generate(chunks, args.output)
 
-    # Exit with error code if any failed
     if any(not r.success for r in results):
         sys.exit(1)
 
