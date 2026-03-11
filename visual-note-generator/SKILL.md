@@ -9,10 +9,10 @@ A skill for converting markdown documents into beautiful visual note-style infog
 
 ## How this skill works
 
-1. **Analyze the input document** - Extract key topics, structure, and content
-2. **Guide user through choices** - Style, aspect ratio, brand customization
-3. **Configure API** - Set up Google Gemini API key
-4. **Generate images** - Create visual note infographics (batch or single)
+1. **Analyze the input document** - Use the host tool's AI to extract structure
+2. **Create JSON input** - Format the analysis into the required JSON structure
+3. **Configure API** - Set up Google Gemini API key for image generation
+4. **Generate images** - Create visual note infographics in parallel
 5. **Save and organize** - Output images to a designated folder
 
 ## Step 1: Get the document
@@ -102,45 +102,69 @@ The script handles:
 
 ## Batch Generation
 
-For processing entire markdown documents, use the batch script with AI-powered smart splitting:
+The batch script accepts **pre-analyzed JSON data** and generates images:
 
 ```bash
-python3 scripts/batch.py \
-  --input document.md \
-  --output output_folder/ \
-  --max-images 10 \
-  --workers 4
+python3 scripts/batch.py --input analysis.json --output output_folder/ --workers 4
 ```
 
-**How it works:**
-1. AI analyzes the entire document structure
-2. Intelligently groups related content by meaning (not just headers)
-3. Suggests the best visual style for your content
-4. Generates images in parallel
+### JSON Input Format
 
-**Batch options:**
+The host tool's AI should analyze the document and produce this JSON structure:
+
+```json
+{
+  "style": "sketchnote",
+  "aspect_ratio": "9:16",
+  "brand": "Brand Name",
+  "tagline": "Your Tagline",
+  "sections": [
+    {
+      "title": "Section Title",
+      "content": "The actual content to visualize (3-8 sentences)...",
+      "visual_type": "list"
+    },
+    {
+      "title": "Another Section",
+      "content": "Content for the second section...",
+      "visual_type": "process"
+    }
+  ]
+}
+```
+
+**Visual types:** `list`, `timeline`, `comparison`, `process`, `diagram`, `other`
+
+### Alternative Inputs
+
+**Markdown file** (simple header-based split):
+```bash
+python3 scripts/batch.py --input document.md --output output_folder/
+```
+
+**JSON via stdin**:
+```bash
+echo '{"sections":[...]}' | python3 scripts/batch.py --output output_folder/
+```
+
+### Options
+
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--input` / `-i` | Input markdown file | Required |
+| `--input` / `-i` | Input file (JSON or markdown) | - |
 | `--output` / `-o` | Output directory | Required |
-| `--max-images` / `-n` | Max number of images | 8 |
-| `--style` / `-s` | Visual style (or let AI suggest) | sketchnote |
+| `--style` / `-s` | Visual style | sketchnote |
 | `--aspect-ratio` / `-a` | Aspect ratio | 9:16 |
 | `--workers` / `-w` | Parallel workers | 3 |
-| `--brand` / `-b` | Brand name | None |
-| `--tagline` / `-t` | Brand tagline | None |
+| `--brand` / `-b` | Brand name | - |
+| `--tagline` / `-t` | Brand tagline | - |
 | `--dry-run` | Preview without generating | - |
 
-**Preview before generating:**
-```bash
-# Dry run to see AI analysis and planned images
-python3 scripts/batch.py --input doc.md --output out/ --dry-run
-```
+### Preview
 
-**Performance tips:**
-- Use `--workers 3-5` for best balance
-- AI analysis takes ~30-60 seconds
-- Higher workers = faster but more rate limiting
+```bash
+python3 scripts/batch.py --input data.json --output out/ --dry-run
+```
 
 ## Style definitions
 
