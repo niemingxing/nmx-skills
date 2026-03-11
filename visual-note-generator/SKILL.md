@@ -12,7 +12,7 @@ A skill for converting markdown documents into beautiful visual note-style infog
 1. **Analyze the input document** - Extract key topics, structure, and content
 2. **Guide user through choices** - Style, aspect ratio, brand customization
 3. **Configure API** - Set up Google Gemini API key
-4. **Generate images** - Create visual note infographics one by one
+4. **Generate images** - Create visual note infographics (batch or single)
 5. **Save and organize** - Output images to a designated folder
 
 ## Step 1: Get the document
@@ -99,6 +99,53 @@ The script handles:
 - API calls to Gemini 3.1 Flash Image Preview
 - Base64 decoding and image saving
 - Error handling and retry logic
+
+## Batch Generation
+
+For processing entire markdown documents, use the batch script:
+
+```bash
+python3 scripts/batch.py \
+  --input document.md \
+  --output output_folder/ \
+  --style sketchnote \
+  --workers 4
+```
+
+**Batch features:**
+- **Automatic document splitting** - Divides markdown by headers (#, ##, ###)
+- **Parallel generation** - Multiple workers generate images simultaneously
+- **Progress tracking** - Real-time status updates
+- **Error recovery** - Continues on failure, shows summary
+- **Smart chunking** - Splits long sections at logical break points
+
+**Batch options:**
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--input` / `-i` | Input markdown file | Required |
+| `--output` / `-o` | Output directory | Required |
+| `--style` / `-s` | Visual style | sketchnote |
+| `--aspect-ratio` / `-a` | Aspect ratio | 9:16 |
+| `--workers` / `-w` | Parallel workers | 3 |
+| `--brand` / `-b` | Brand name | None |
+| `--tagline` / `-t` | Brand tagline | None |
+| `--max-chunk-size` | Max chars per chunk | 1000 |
+| `--dry-run` | Preview without generating | - |
+| `--list-chunks` | Show detected chunks | - |
+
+**Preview before generating:**
+```bash
+# See what chunks will be generated
+python3 scripts/batch.py --input doc.md --output out/ --list-chunks
+
+# Dry run to verify settings
+python3 scripts/batch.py --input doc.md --output out/ --dry-run
+```
+
+**Performance tips:**
+- Use `--workers 3-5` for best balance (API rate limits apply)
+- Higher workers = faster but more likely to hit rate limits
+- For large documents, start with lower worker count
 
 ## Style definitions
 

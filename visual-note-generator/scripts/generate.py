@@ -17,50 +17,7 @@ except ImportError:
     print("Error: requests module not found. Install with: pip install requests")
     sys.exit(1)
 
-
-# Style definitions
-STYLES = {
-    "sketchnote": """
-Visual note-taking infographic with hand-drawn sketchnote style.
-Include: sticky notes, arrow connectors, icons, color-coded sections,
-marker pen highlights, doodle elements, clean white background.
-Use pastel colors: coral, mint, lavender, mustard, sky blue.
-Professional yet friendly style with bilingual text support.
-""",
-
-    "minimalist": """
-Clean minimalist infographic with ample white space.
-Simple geometric shapes, thin lines, limited color palette (2-3 colors max).
-Clear hierarchy, sans-serif typography, no decorative elements.
-Professional corporate style with focus on readability.
-""",
-
-    "colorful": """
-Bold vibrant infographic with eye-catching colors.
-Gradient backgrounds, large typography, icon-heavy layout.
-Bright accent colors: electric blue, hot pink, lime green, sunny yellow.
-High contrast, energetic feel with modern design.
-""",
-
-    "dark": """
-Dark mode infographic with dark gray/black background (#1a1a1a).
-Neon accent colors: cyan (#00d4ff), magenta (#ff00ff), lime (#00ff00), amber (#ffcc00).
-Glowing effects, thin bright lines for contrast.
-Modern tech aesthetic with futuristic feel.
-""",
-
-    "retro": """
-Vintage-style infographic with paper texture background.
-Muted earth tones: sepia, olive, rust, cream, teal.
-Hand-drawn feel with slightly imperfect lines.
-Classic typography, aged paper aesthetic with nostalgic charm.
-"""
-}
-
-
-def get_style_prompt(style_name: str) -> str:
-    """Get the style prompt prefix for a given style."""
-    return STYLES.get(style_name.lower(), STYLES["sketchnote"])
+from styles import STYLES, get_style_prompt
 
 
 def generate_image(
